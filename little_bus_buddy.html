@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#132b2b">
+<title>Little Bus Buddy · Alkmaar</title>
+<style>
+:root{color-scheme:dark;--bg:#101d20;--panel:#192a2d;--mint:#b7f2d0;--muted:#a9bcbd;--line:#304447}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(160deg,#132b2b,#10171e 70%);color:#f4f8f6;font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
+main{max-width:520px;margin:auto;padding:24px 18px 40px}.eyebrow{color:var(--mint);font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+h1{font-size:32px;line-height:1.08;margin:8px 0 10px;letter-spacing:-.04em}.sub{color:var(--muted);margin:0 0 22px}
+.panel{background:rgba(25,42,45,.94);border:1px solid var(--line);border-radius:22px;padding:18px;margin:14px 0;box-shadow:0 10px 30px #0002}
+button,a.btn{font:inherit;font-weight:750;display:flex;align-items:center;justify-content:center;gap:9px;width:100%;border:0;border-radius:15px;padding:15px 16px;text-decoration:none;cursor:pointer}
+.primary{background:var(--mint);color:#102321}.secondary{background:#263b3e;color:#f4f8f6;border:1px solid #3a5558!important}
+.status{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:14px}.dot{width:9px;height:9px;border-radius:50%;background:#f2c879;flex:none}.big{font-size:23px;font-weight:800;margin:8px 0 3px}.small{font-size:13px;color:var(--muted)}.row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.pill{font-size:12px;padding:5px 9px;border-radius:99px;background:#2c4144;color:var(--mint);white-space:nowrap}
+#stopList{padding:0;margin:12px 0 0;list-style:none}#stopList li{padding:12px 0;border-top:1px solid var(--line)}.stopname{font-weight:700}.distance{color:var(--muted);font-size:13px;margin-top:3px}
+.note{font-size:13px;color:var(--muted)}.links{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.links a{font-size:14px;padding:12px 8px}
+footer{text-align:center;color:#84999b;font-size:12px;padding:16px 8px}
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Your little travel companion</div>
+  <h1>Let's catch<br>Bus 2. 🚌</h1>
+  <p class="sub">A simple starting point for your Alkmaar bus buddy.</p>
+  <section class="panel">
+    <div class="status"><span class="dot" id="dot"></span><span id="locationStatus">Location hasn't been checked yet</span></div>
+    <div class="big" id="nearest">Find your nearest stop</div>
+    <p class="small" id="nearestMeta">Allow location access to look for nearby bus stops.</p>
+    <button class="primary" id="locate" style="margin-top:16px">◎ Find stops near me</button>
+    <ul id="stopList"></ul>
+  </section>
+  <section class="panel">
+    <div class="row"><div><div class="eyebrow">Bus 2 · Alkmaar</div><div class="big">Next departure</div></div><span class="pill">Data connection needed</span></div>
+    <p class="note">This first version can locate nearby stops, but it is not yet receiving live Bus 2 departure predictions. I won't invent a countdown or mistake a timetable for live data.</p>
+    <div class="links">
+      <a class="btn secondary" href="https://9292.nl/" target="_blank" rel="noopener">Open 9292 ↗</a>
+      <a class="btn secondary" href="https://www.connexxion.nl/" target="_blank" rel="noopener">Connexxion ↗</a>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="eyebrow">When a stop is found</div>
+    <div class="big">Walking directions</div>
+    <p class="note">Choose a nearby stop below to open walking directions in Apple Maps.</p>
+    <a id="maps" class="btn secondary" href="https://maps.apple.com/" target="_blank" rel="noopener">Open Apple Maps ↗</a>
+  </section>
+  <footer>Location is requested only when you tap the button. Your coordinates are used in this browser to search nearby stops.</footer>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let currentPos=null;
+function distance(lat1,lon1,lat2,lon2){const R=6371000,p=Math.PI/180,a=Math.sin((lat2-lat1)*p/2)**2+Math.cos(lat1*p)*Math.cos(lat2*p)*Math.sin((lon2-lon1)*p/2)**2;return 2*R*Math.asin(Math.sqrt(a))}
+function mapsUrl(lat,lon,name){return 'https://maps.apple.com/?daddr='+encodeURIComponent(lat+','+lon)+'&dirflg=w&q='+encodeURIComponent(name||'Bus stop')}
+async function findStops(lat,lon){
+  $('locationStatus').textContent='Looking for nearby bus stops…';
+  // Overpass public map data: bus stops and platforms within 1.5 km.
+  const query='[out:json][timeout:20];(node(around:1500,'+lat+','+lon+')["highway"="bus_stop"];node(around:1500,'+lat+','+lon+')["public_transport"="platform"]["bus"="yes"];node(around:1500,'+lat+','+lon+')["public_transport"="stop_position"]["bus"="yes"];);out body;';
+  const endpoints=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+  let data=null;
+  for(const endpoint of endpoints){try{const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8'},body:query});if(r.ok){data=await r.json();break}}catch(e){}}
+  if(!data)throw new Error('The public map service did not respond. Please try again in a moment.');
+  const seen=new Set(),stops=[];
+  for(const el of data.elements||[]){if(!el.lat||!el.lon)continue;const name=el.tags?.name||el.tags?.local_ref||'Unnamed bus stop';const d=distance(lat,lon,el.lat,el.lon);const key=name.toLowerCase()+':'+Math.round(el.lat*10000)+':'+Math.round(el.lon*10000);if(!seen.has(key)){seen.add(key);stops.push({name,lat:el.lat,lon:el.lon,d,tags:el.tags||{}})}}
+  stops.sort((a,b)=>a.d-b.d);return stops.slice(0,6)
+}
+$('locate').addEventListener('click',()=>{
+ if(!navigator.geolocation){$('locationStatus').textContent='This browser does not support location access.';return}
+ $('locate').disabled=true;$('locate').textContent='Finding your location…';
+ navigator.geolocation.getCurrentPosition(async p=>{
+  currentPos={lat:p.coords.latitude,lon:p.coords.longitude};
+  try{
+   const stops=await findStops(currentPos.lat,currentPos.lon);
+   $('dot').style.background='#8ee2b2';$('locationStatus').textContent='Location found · nearby map stops';
+   if(!stops.length){$('nearest').textContent='No bus stops found nearby';$('nearestMeta').textContent='Try again outdoors or search in Maps.';$('stopList').innerHTML='';return}
+   $('nearest').textContent=stops[0].name;$('nearestMeta').textContent=Math.round(stops[0].d)+' m away · nearest mapped bus stop';
+   $('maps').href=mapsUrl(stops[0].lat,stops[0].lon,stops[0].name);
+   $('stopList').innerHTML=stops.map((s,i)=>'<li><div class="row"><div><div class="stopname">'+escapeHtml(s.name)+'</div><div class="distance">'+Math.round(s.d)+' m away</div></div><a class="pill" style="text-decoration:none" target="_blank" rel="noopener" href="'+mapsUrl(s.lat,s.lon,s.name)+'">Walk ↗</a></div></li>').join('');
+  }catch(e){$('locationStatus').textContent=e.message||'Could not load nearby stops.'}
+  finally{$('locate').disabled=false;$('locate').textContent='↻ Refresh nearby stops'}
+ },e=>{$('locationStatus').textContent=e.code===1?'Location permission was denied. Allow it in Safari settings and try again.':'Could not get your location. Check Location Services and try again.';$('locate').disabled=false;$('locate').textContent='◎ Find stops near me'},{enableHighAccuracy:true,timeout:15000,maximumAge:60000})
+});
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+</script>
+</body>
+</html>
